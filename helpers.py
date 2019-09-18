@@ -2,6 +2,34 @@ import cv2
 import numpy as np
 import random 
 import copy
+import tensorflow as tf
+
+'''
+Computes vectorized IoU for two arrays of boxes
+Adapted from https://medium.com/@venuktan/vectorized-intersection-over-union-iou-in-numpy-and-tensor-flow-4fa16231b63d
+Args:
+    boxes1: tensor of shape (-1, 4)
+    boxes2: tensor of shape (-1, 4)
+Returns:
+    ious: tensor of shape (boxes1.shape[0], boxes2.shape[0])
+'''
+@tf.function
+def intersection_over_union(boxes1, boxes2):
+    x11, y11, x12, y12 = tf.split(boxes1, 4, axis=1)
+    x21, y21, x22, y22 = tf.split(boxes2, 4, axis=1)
+
+    xA = tf.maximum(x11, tf.transpose(x21))
+    yA = tf.maximum(y11, tf.transpose(y21))
+    xB = tf.minimum(x12, tf.transpose(x22))
+    yB = tf.minimum(y12, tf.transpose(y22))
+
+    interArea = tf.maximum((xB - xA + 1), 0) * tf.maximum((yB - yA + 1), 0)
+
+    boxAArea = (x12 - x11 + 1) * (y12 - y11 + 1)
+    boxBArea = (x22 - x21 + 1) * (y22 - y21 + 1)
+
+    iou = interArea / (boxAArea + tf.transpose(boxBArea) - interArea)
+    return iou
 
 def IoUTensorial(A: np.ndarray, B: np.ndarray, format: str = 'XYWH') -> np.ndarray:
     '''

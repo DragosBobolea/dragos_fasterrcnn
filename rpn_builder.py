@@ -1,8 +1,7 @@
-from anchors import generate_anchors, generate_minibatch_mask
 import numpy as np
 import tensorflow as tf
 keras = tf.keras
-
+from helpers import intersection_over_union
 class RegionProposalNetwork(keras.Model):
     def __init__(self, backbone, scales, ratios):
         super(RegionProposalNetwork, self).__init__()
@@ -98,4 +97,43 @@ class RegionProposalNetwork(keras.Model):
         anchors = tf.expand_dims(anchors,axis=0)
         return anchors
 
+    '''
+    Creates masks for positive and negative anchors to be used for training
+    Args:
+        anchors: tensor of shape (1, height, width, num_anchors, 4)
+        ground_truths: tensor of shape (1, None, 4)
+    Returns:
+        positive_minibatch: tensor of shape (1, -1, 6) where:
+            first dimension is minibatch idx
+            third dimension is (anchor idx) + (delta xywh)
+        negative_minibatch: tensor of shape (1,-1) where:
+            first dimension is minibatch idx
+            second dimension is anchor flattened id
+    '''
+    def assign_anchors_to_ground_truths(self, anchors, ground_truths):
+        anchors = tf.cast(anchors, tf.float32)
+        ground_truths = tf.cast(ground_truths, tf.float32)
+        flattened_ground_truths = tf.reshape(ground_truths, (-1,4))
+        flattened_anchors = tf.reshape(anchors, (-1,4))
+        ious = intersection_over_union(flattened_anchors, flattened_ground_truths)
 
+        # positive_anchor_indices_i = tf.argmax(ious,axis=1)
+        # ious = tf.reshape(ious,(anchors.shape[1], anchors.shape[2], anchors.shape[3], ground_truths.shape[1]))
+        
+        # (ii)
+        max_iou_per_anchor = tf.reduce_max(ious,axis=1)
+        positive_anchors = tf.greater_equal(max_iou_per_anchor, self.positive_iou_threshold)
+        ground_truth_per_anchor = tf.argmax(ious,axis=1)
+        positive_anchor_indices = tf.where(positive_anchors)[0]
+        positive_gt_indices = tf.gather(ground_truth_per_anchor, positive_anchor_indices)
+
+        positive_anchor_indices_unraveled = tf.unravel_index(positive_anchor_indices, (anchors.shape[0], anchors.shape[1], anchors.shape[2], anchors.shape[3]))
+        return positive_anchor_indices_unraveled, positive_gt_indices
+        # find indices of anchors with maxiou > 0.7
+        # for these indices, find corresponding ground truth with ious.argmax()
+
+        # # (i)
+        # anchor_classes[ious.argmax(axis=1)] = 1
+        # # (ii)
+        # anchor_classes[ious.T.max(axis=1) >= positive_iou_threshold] = 1
+    
