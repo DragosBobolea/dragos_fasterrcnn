@@ -69,7 +69,7 @@ class RpnTest(unittest.TestCase):
 
 
     def test_get_minibatch(self):
-        DEBUG = True
+        DEBUG = False
         if DEBUG:
             image = np.ones((500,500,3))
             box_size = 60
@@ -100,7 +100,27 @@ class RpnTest(unittest.TestCase):
                 cv2.rectangle(image, (int(anchor[0]), int(anchor[1])), (int(anchor[2]), int(anchor[3])), (0,0,255),1)
             cv2.imshow('anchors', image)
             cv2.waitKey(0)
+
+    def test_targets(self):
+        DEBUG = True
+        if DEBUG:
+            image = np.ones((500,500,3))
+            box_size = 60
+            bounding_boxes = np.array([[100,100,100+box_size,100+box_size],[300,300,300+box_size,300+box_size]])
+            for box in bounding_boxes:
+                image[box[1]:box[3],box[0]:box[2]] = 0
             
+            backbone = None
+            scales = [0.5, 1, 2]
+            ratios = [0.5, 1, 2]
+            rpn = RegionProposalNetwork(backbone, scales, ratios)
+            image_feature_map = np.zeros((1, image.shape[0] // rpn.stride, image.shape[1] // rpn.stride, 2048))
+            anchors = rpn.generate_anchors(image_feature_map)
+            positive_anchor_indices, positive_ground_truth_indices, negative_anchor_indices = rpn.generate_minibatch(anchors, np.expand_dims(bounding_boxes,axis=0))
+            targets = rpn.get_targets(anchors, np.expand_dims(bounding_boxes.astype(np.float32),axis=0), positive_anchor_indices, positive_ground_truth_indices, negative_anchor_indices)
+            
+
+
     def test_rpn(self):
         DEBUG = False
         if DEBUG:

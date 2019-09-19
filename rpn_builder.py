@@ -76,6 +76,40 @@ class RegionProposalNetwork(keras.Model):
         
 
     '''
+    Computes targets for box regression
+    ''' 
+    def get_targets(self, anchors, ground_truths, positive_anchor_indices, positive_gt_indices, negative_anchor_indices):
+        positive_anchors = tf.gather_nd(anchors[0],tf.transpose(positive_anchor_indices[0]))
+        positive_anchors_coords = tf.unstack(positive_anchors, axis=1)
+        positive_anchors_left = positive_anchors_coords[0]
+        positive_anchors_top = positive_anchors_coords[1]
+        positive_anchors_right = positive_anchors_coords[2]
+        positive_anchors_bottom = positive_anchors_coords[3]
+        positive_anchors_x = (positive_anchors_left + positive_anchors_right) / 2
+        positive_anchors_y = (positive_anchors_top + positive_anchors_bottom) / 2
+        positive_anchors_w = (positive_anchors_right - positive_anchors_left)
+        positive_anchors_h = (positive_anchors_bottom - positive_anchors_top)
+
+        ground_truths_coords = tf.gather(ground_truths[0], positive_gt_indices[0])
+        ground_truths_coords = tf.unstack(ground_truths_coords, axis=1)
+        ground_truths_left = ground_truths_coords[0]
+        ground_truths_top = ground_truths_coords[1]
+        ground_truths_right = ground_truths_coords[2]
+        ground_truths_bottom = ground_truths_coords[3]
+        ground_truths_x = (ground_truths_left + ground_truths_right) / 2
+        ground_truths_y = (ground_truths_top + ground_truths_bottom) / 2
+        ground_truths_w = (ground_truths_right - ground_truths_left)
+        ground_truths_h = (ground_truths_bottom - ground_truths_top)
+
+        target_x = (ground_truths_x - positive_anchors_x) / positive_anchors_w
+        target_y = (ground_truths_y - positive_anchors_y) / positive_anchors_h
+        target_w = tf.math.log(ground_truths_w / positive_anchors_w)
+        target_h = tf.math.log(ground_truths_h / positive_anchors_h)
+        target_boxes = tf.stack([target_x, target_y, target_w, target_h])
+        
+
+        return target_boxes
+    '''
     Generates anchor templates, in XYXY format, centered at 0
     Returns:
         anchor_templates: numpy array of shape (n_scales * n_ratios, 4)
