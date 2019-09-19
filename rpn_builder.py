@@ -8,10 +8,12 @@ class RegionProposalNetwork(keras.Model):
         # hard-coded parameters (for now)
         self.stride = 32
         self.base_anchor_size = 64
-        self.positive_iou_threshold = 0.7
+        self.positive_iou_threshold = 0.5
         self.negative_iou_threshold = 0.3
         self.batch_size = 256
         self.positives_ratio = 0.5
+        self.minibatch_positives_number = int(self.positives_ratio * self.batch_size)
+        self.minibatch_negatives_number = self.batch_size - self.minibatch_positives_number
         self.max_number_of_predictions = 400
 
         # parameters
@@ -40,11 +42,38 @@ class RegionProposalNetwork(keras.Model):
         # build minibatch
         # apply loss to minibatch
 
-    def generate_minibatch(self):
-        pass
-        anchors = generate_anchors(image.shape)
-        anchors_batch_indices, positive_anchors_indices, negative_anchors_indices = generate_minibatch_mask(anchors, ground_truths)
-    
+    '''
+    Generates a random minibatch from positive and negative anchors
+        Args:
+        anchors: tensor of shape (1, height, width, num_anchors, 4)
+        ground_truths: tensor of shape (1, None, 4)
+    Returns:
+        positive_anchor_indices: tensor of shape (1, 3, num_positive_anchors)
+            Note: second dimension has indices for dimensions (height, width, num_anchors)
+        positive_gt_indices: tensor of shape (1, num_positive_anchors)
+        negative_anchor_indices: tensor of shape (1, 3, num_negative_anchors)
+            Note: second dimension has indices for dimensions (height, width, num_anchors)
+    '''
+    @tf.function
+    def generate_minibatch(self, anchors, ground_truths):
+        positive_anchor_indices, positive_gt_indices, negative_anchor_indices = self.assign_anchors_to_ground_truths(anchors, ground_truths)
+        n_positives = tf.minimum(tf.shape(positive_anchor_indices)[2], self.minibatch_positives_number)
+        n_negatives = tf.minimum(tf.shape(negative_anchor_indices)[2], self.batch_size - n_positives)
+        
+        indices = tf.range(tf.shape(positive_anchor_indices)[2])
+        indices = tf.random.shuffle(indices)
+        indices = tf.slice(indices, [0], [n_positives])
+
+        positive_anchor_indices = tf.gather(positive_anchor_indices, indices,axis=2)
+        positive_gt_indices = tf.gather(positive_gt_indices, indices,axis=1)
+
+        indices = tf.range(tf.shape(negative_anchor_indices)[2])
+        indices = tf.random.shuffle(indices)
+        indices = tf.slice(indices, [0], [n_negatives])
+        negative_anchor_indices = tf.gather(negative_anchor_indices, indices,axis=2)
+
+        return positive_anchor_indices, positive_gt_indices, negative_anchor_indices
+        
 
     '''
     Generates anchor templates, in XYXY format, centered at 0
@@ -76,15 +105,16 @@ class RegionProposalNetwork(keras.Model):
     @tf.function
     def generate_anchors(self, feature_map):
         # TODO support minibatch by tiling anchors on first dimension
+        feature_map_shape = tf.shape(feature_map)
         assert feature_map.shape[0] == 1
-        vertical_stride = tf.range(0,feature_map.shape[1])
-        vertical_stride = tf.tile(vertical_stride,[feature_map.shape[2]])
-        vertical_stride = tf.reshape(vertical_stride, (feature_map.shape[2], feature_map.shape[1]))
+        vertical_stride = tf.range(0,feature_map_shape[1])
+        vertical_stride = tf.tile(vertical_stride,[feature_map_shape[2]])
+        vertical_stride = tf.reshape(vertical_stride, (feature_map_shape[2], feature_map_shape[1]))
         vertical_stride = tf.transpose(vertical_stride)
 
-        horizontal_stride = tf.range(0,feature_map.shape[2])
-        horizontal_stride = tf.tile(horizontal_stride, [feature_map.shape[1]])
-        horizontal_stride = tf.reshape(horizontal_stride, (feature_map.shape[1], feature_map.shape[2]))
+        horizontal_stride = tf.range(0,feature_map_shape[2])
+        horizontal_stride = tf.tile(horizontal_stride, [feature_map_shape[1]])
+        horizontal_stride = tf.reshape(horizontal_stride, (feature_map_shape[1], feature_map_shape[2]))
 
         centers_xyxy = tf.stack([horizontal_stride, vertical_stride, horizontal_stride, vertical_stride], axis=2)
 
@@ -92,7 +122,7 @@ class RegionProposalNetwork(keras.Model):
         centers_xyxy = tf.cast(centers_xyxy,tf.float32)
 
         centers_xyxy = tf.tile(centers_xyxy,[1,1,self.anchor_templates.shape[0]])
-        centers_xyxy = tf.reshape(centers_xyxy, (feature_map.shape[1], feature_map.shape[2], self.anchor_templates.shape[0], 4))
+        centers_xyxy = tf.reshape(centers_xyxy, (feature_map_shape[1], feature_map_shape[2], self.anchor_templates.shape[0], 4))
         anchors = centers_xyxy + self.anchor_templates
         anchors = tf.expand_dims(anchors,axis=0)
         return anchors
@@ -108,9 +138,8 @@ class RegionProposalNetwork(keras.Model):
         positive_gt_indices: tensor of shape (1, num_positive_anchors)
         negative_anchor_indices: tensor of shape (1, 3, num_negative_anchors)
             Note: second dimension has indices for dimensions (height, width, num_anchors)
-
     '''
-    # @tf.function
+    @tf.function
     def assign_anchors_to_ground_truths(self, anchors, ground_truths):
         anchors = tf.cast(anchors, tf.float32)
         ground_truths = tf.cast(ground_truths, tf.float32)
