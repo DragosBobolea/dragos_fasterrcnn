@@ -49,10 +49,11 @@ class RpnTest(unittest.TestCase):
             rpn = RegionProposalNetwork(backbone, scales, ratios)
             image_feature_map = np.zeros((1, image.shape[0] // rpn.stride, image.shape[1] // rpn.stride, 2048))
             anchors = rpn.generate_anchors(image_feature_map)
-            positive_anchor_indices, positive_ground_truth_indices = rpn.assign_anchors_to_ground_truths(anchors, np.expand_dims(bounding_boxes,axis=0))
-            positive_anchors = np.array(anchors)[list(positive_anchor_indices)]
-            # positive_anchors = np.array(anchors).reshape((-1,4))[positive_anchor_indices]
-            positive_ground_truths = [bounding_boxes[positive_ground_truth_indices]]
+            positive_anchor_indices, positive_ground_truth_indices, negative_anchor_indices = rpn.assign_anchors_to_ground_truths(anchors, np.expand_dims(bounding_boxes,axis=0))
+            positive_anchor_indices = np.array(positive_anchor_indices).reshape((3,-1))
+            positive_ground_truth_indices = np.array(positive_ground_truth_indices).reshape((-1))
+            positive_anchors = np.squeeze(anchors)[positive_anchor_indices[0],positive_anchor_indices[1],positive_anchor_indices[2]]
+            positive_ground_truths = bounding_boxes[positive_ground_truth_indices]
 
             for anchor in positive_anchors:
                 cv2.rectangle(image, (int(anchor[0]), int(anchor[1])), (int(anchor[2]), int(anchor[3])), (0,0,255),1)
