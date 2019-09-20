@@ -10,12 +10,13 @@ class RegionProposalNetwork(keras.Model):
         self.base_anchor_size = 64
         self.positive_iou_threshold = 0.5
         self.negative_iou_threshold = 0.3
-        self.batch_size = 256
+        self.batch_size = 4
         self.positives_ratio = 0.5
         self.minibatch_positives_number = int(self.positives_ratio * self.batch_size)
         self.minibatch_negatives_number = self.batch_size - self.minibatch_positives_number
         self.max_number_of_predictions = 400
-
+        self.loss_classification_weight = 1
+        self.loss_regression_weight = 0
         # parameters
         self.backbone = backbone
         self.scales = scales
@@ -23,24 +24,63 @@ class RegionProposalNetwork(keras.Model):
         self.anchor_templates = self.__get_anchor_templates()
 
         # layers
-        self.conv1 = keras.layers.Conv2D(filters=256,kernel_size=3,activation='relu')
-        self.box_regression = keras.layers.Conv2D(4, 1)
-        self.box_classification = keras.layers.Conv2D(1,1,activation='softmax')
+        self.conv1 = keras.layers.Conv2D(filters=256,kernel_size=3,activation='relu',padding='same')
+        self.conv2 = keras.layers.Conv2D(filters=256,kernel_size=3,activation='relu',padding='same')
+        self.box_regression = keras.layers.Conv2D(filters=4 * len(self.anchor_templates), kernel_size=1)
+        self.box_classification = keras.layers.Conv2D(filters=2 * len(self.anchor_templates), kernel_size=1, activation='sigmoid')
 
     def call(self, input, training=False):
-        x = self.backbone(input)
-        x = self.conv1(x)
+        x = self.conv1(input)
+        x = self.conv2(x)
         output_regression = self.box_regression(x)
+        output_regression = tf.reshape(output_regression, (output_regression.shape[0], output_regression.shape[1], output_regression.shape[2], len(self.anchor_templates), 4))
+
         output_classification = self.box_classification(x)
+        output_classification = tf.reshape(output_classification, (output_classification.shape[0], output_classification.shape[1], output_classification.shape[2], len(self.anchor_templates), 2))
+        output = tf.concat((output_classification, output_regression),axis=4)
+        return output
 
-        return output_regression, output_classification
+    def get_boxes(self, predictions):
+        rpn_output_classification = predictions[:,:,:,:,:2]
+        rpn_output_regression = predictions[:,:,:,:,2:]
+        
+        positives_mask = tf.argmax(rpn_output_classification,axis=4) == 1
+        anchors = self.generate_anchors(predictions)
 
-    def build_loss(self, ground_truths, predictions):
-        pass
-        # generate anchors
-        # assign anchors to predictions
-        # build minibatch
-        # apply loss to minibatch
+
+        # boxes = anchors[positives_mask] 
+        # scores = rpn_output_classification[positives_mask][:,:,:,:,1]
+        # boxes = tf.image.non_max_suppression(boxes, scores)
+        return anchors[positives_mask]
+
+    # @tf.function
+    def rpn_loss(self, ground_truths, rpn_output):
+        # identify positive anchors
+        # create a minibatch of anchors/ground truths
+        # apply L1 to minibatch
+        anchors = self.generate_anchors(rpn_output)
+        positive_anchor_indices, positive_gt_indices, negative_anchor_indices = self.generate_minibatch(anchors, ground_truths)
+        ground_truth_targets = self.get_targets(anchors, ground_truths, positive_anchor_indices, positive_gt_indices, negative_anchor_indices)
+
+        rpn_output_classification = rpn_output[:,:,:,:,:2]
+        rpn_output_regression = rpn_output[:,:,:,:,2:]
+
+        positives_classification = tf.gather_nd(rpn_output_classification[0], tf.transpose(positive_anchor_indices[0]))
+        positives_regression = tf.gather_nd(rpn_output_regression[0], tf.transpose(positive_anchor_indices[0]))
+
+        negatives_classification = tf.gather_nd(rpn_output_classification[0], tf.transpose(negative_anchor_indices[0]))
+
+        ones = tf.ones((tf.shape(positive_gt_indices)[1]),dtype=tf.int32)
+        zeros = tf.zeros((tf.shape(negative_anchor_indices)[2]),dtype=tf.int32)
+        
+        minibatch_classes = tf.concat((ones, zeros), axis=0)
+        minibatch_classes = tf.one_hot(minibatch_classes, 2)
+        prediction_classes = tf.concat((positives_classification, negatives_classification), axis=0)
+        classification_loss = tf.losses.binary_crossentropy(prediction_classes, minibatch_classes)
+        regression_loss = tf.losses.mean_absolute_error(positives_regression, ground_truth_targets)
+
+        return self.loss_regression_weight * tf.reduce_mean(regression_loss) + self.loss_classification_weight * tf.reduce_mean(classification_loss)
+
 
     '''
     Generates a random minibatch from positive and negative anchors
@@ -54,7 +94,7 @@ class RegionProposalNetwork(keras.Model):
         negative_anchor_indices: tensor of shape (1, 3, num_negative_anchors)
             Note: second dimension has indices for dimensions (height, width, num_anchors)
     '''
-    @tf.function
+    # @tf.function
     def generate_minibatch(self, anchors, ground_truths):
         positive_anchor_indices, positive_gt_indices, negative_anchor_indices = self.assign_anchors_to_ground_truths(anchors, ground_truths)
         n_positives = tf.minimum(tf.shape(positive_anchor_indices)[2], self.minibatch_positives_number)
@@ -78,6 +118,7 @@ class RegionProposalNetwork(keras.Model):
     '''
     Computes targets for box regression
     ''' 
+    # @tf.function
     def get_targets(self, anchors, ground_truths, positive_anchor_indices, positive_gt_indices, negative_anchor_indices):
         positive_anchors = tf.gather_nd(anchors[0],tf.transpose(positive_anchor_indices[0]))
         positive_anchors_coords = tf.unstack(positive_anchors, axis=1)
@@ -91,13 +132,14 @@ class RegionProposalNetwork(keras.Model):
         positive_anchors_h = (positive_anchors_bottom - positive_anchors_top)
 
         ground_truths_coords = tf.gather(ground_truths[0], positive_gt_indices[0])
+        ground_truths_coords = tf.cast(ground_truths_coords,tf.float32)
         ground_truths_coords = tf.unstack(ground_truths_coords, axis=1)
         ground_truths_left = ground_truths_coords[0]
         ground_truths_top = ground_truths_coords[1]
         ground_truths_right = ground_truths_coords[2]
         ground_truths_bottom = ground_truths_coords[3]
-        ground_truths_x = (ground_truths_left + ground_truths_right) / 2
-        ground_truths_y = (ground_truths_top + ground_truths_bottom) / 2
+        ground_truths_x = (ground_truths_left + ground_truths_right) / tf.cast(2,tf.float32)
+        ground_truths_y = (ground_truths_top + ground_truths_bottom) / tf.cast(2,tf.float32)
         ground_truths_w = (ground_truths_right - ground_truths_left)
         ground_truths_h = (ground_truths_bottom - ground_truths_top)
 
@@ -106,8 +148,7 @@ class RegionProposalNetwork(keras.Model):
         target_w = tf.math.log(ground_truths_w / positive_anchors_w)
         target_h = tf.math.log(ground_truths_h / positive_anchors_h)
         target_boxes = tf.stack([target_x, target_y, target_w, target_h])
-        
-
+        target_boxes = tf.transpose(target_boxes)
         return target_boxes
     '''
     Generates anchor templates, in XYXY format, centered at 0
@@ -136,7 +177,7 @@ class RegionProposalNetwork(keras.Model):
     Returns:
         anchors: tensor of shape (1, height, width, num_anchors, 4)
     '''
-    @tf.function
+    # @tf.function
     def generate_anchors(self, feature_map):
         # TODO support minibatch by tiling anchors on first dimension
         feature_map_shape = tf.shape(feature_map)
@@ -173,7 +214,7 @@ class RegionProposalNetwork(keras.Model):
         negative_anchor_indices: tensor of shape (1, 3, num_negative_anchors)
             Note: second dimension has indices for dimensions (height, width, num_anchors)
     '''
-    @tf.function
+    # @tf.function
     def assign_anchors_to_ground_truths(self, anchors, ground_truths):
         anchors = tf.cast(anchors, tf.float32)
         ground_truths = tf.cast(ground_truths, tf.float32)

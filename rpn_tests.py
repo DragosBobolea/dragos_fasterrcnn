@@ -102,7 +102,7 @@ class RpnTest(unittest.TestCase):
             cv2.waitKey(0)
 
     def test_targets(self):
-        DEBUG = True
+        DEBUG = False
         if DEBUG:
             image = np.ones((500,500,3))
             box_size = 60
@@ -120,20 +120,72 @@ class RpnTest(unittest.TestCase):
             targets = rpn.get_targets(anchors, np.expand_dims(bounding_boxes.astype(np.float32),axis=0), positive_anchor_indices, positive_ground_truth_indices, negative_anchor_indices)
             
 
-
-    def test_rpn(self):
+    def test_rpn_loss(self):
         DEBUG = False
         if DEBUG:
-            scales = [1]
-            ratios = [1]
-            image = cv2.imread(os.path.join('images','1.jpg'))
-            image = image.astype(np.float32) \
-                .reshape((1,image.shape[0],image.shape[1],3))
+            image = np.ones((500,500,3))
+            box_size = 60
+            bounding_boxes = np.array([[100,100,100+box_size,100+box_size],[300,300,300+box_size,300+box_size]])
+            for box in bounding_boxes:
+                image[box[1]:box[3],box[0]:box[2]] = 0
 
+            scales = [0.5, 1, 2]
+            ratios = [0.5, 1, 2]
+            image_batch = image.reshape(1,500,500,3)
             backbone = keras.applications.ResNet50(include_top=False)
             rpn = RegionProposalNetwork(backbone, scales, ratios)
-            image_feature_map = backbone(image)
-            anchors = rpn.generate_anchors(image_feature_map)
-            print(anchors)
+            image_feature_map = backbone(image_batch)
+            rpn_output = rpn.call(image_feature_map)
+            loss = rpn.rpn_loss(np.array([bounding_boxes]), rpn_output)
+
+    def test_rpn(self):
+        DEBUG = True
+        if DEBUG:
+            image = np.ones((500,500,3))
+            box_size = 60
+            bounding_boxes = np.array([[100,100,100+box_size,100+box_size],[300,300,300+box_size,300+box_size]])
+            for box in bounding_boxes:
+                image[box[1]:box[3],box[0]:box[2]] = 0
+
+            scales = [0.5, 1, 2]
+            ratios = [0.5, 1, 2]
+            image_batch = image.reshape(1,500,500,3)
+            backbone = keras.applications.ResNet50(include_top=False)
+            rpn = RegionProposalNetwork(backbone, scales, ratios)
+            image_feature_map = backbone(image_batch)
+            rpn_output = rpn.call(image_feature_map)
+            loss_object = rpn.rpn_loss
+            
+            optimizer = tf.keras.optimizers.Adam()
+            train_loss = tf.keras.metrics.Mean(name='train_loss')
+            train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+            EPOCHS = 200
+            for epoch in range(EPOCHS):
+                self.train_step(backbone, rpn, loss_object, optimizer, image_batch, [bounding_boxes], train_loss, train_accuracy)
+
+
+                template = 'Epoch {}, Loss: {}, Accuracy: {}'
+                print(template.format(epoch+1,
+                                        train_loss.result(),
+                                        train_accuracy.result()*100))
+
+                # Reset the metrics for the next epoch
+                train_loss.reset_states()
+                train_accuracy.reset_states()
+            
+            predicted_boxes = rpn.get_boxes(rpn.call(image_feature_map))
+            print(predicted_boxes)
+    # @tf.function
+    def train_step(self, backbone, rpn, loss_object, optimizer, images, labels, train_loss, train_accuracy):
+        with tf.GradientTape() as tape:
+            feature_map = backbone(images)
+            predictions = rpn(feature_map)
+            loss = loss_object(labels, predictions)
+            gradients = tape.gradient(loss, rpn.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, rpn.trainable_variables))
+
+        train_loss(loss)
+        # train_accuracy(labels, predictions)
+        
 if __name__ == '__main__':
     unittest.main()
