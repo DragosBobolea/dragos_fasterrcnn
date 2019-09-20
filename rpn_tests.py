@@ -142,7 +142,7 @@ class RpnTest(unittest.TestCase):
         DEBUG = True
         if DEBUG:
             image = np.ones((500,500,3))
-            box_size = 60
+            box_size = 80
             bounding_boxes = np.array([[100,100,100+box_size,100+box_size],[300,300,300+box_size,300+box_size]])
             for box in bounding_boxes:
                 image[box[1]:box[3],box[0]:box[2]] = 0
@@ -159,7 +159,9 @@ class RpnTest(unittest.TestCase):
             optimizer = tf.keras.optimizers.Adam()
             train_loss = tf.keras.metrics.Mean(name='train_loss')
             train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
-            EPOCHS = 200
+            
+            
+            EPOCHS = 100
             for epoch in range(EPOCHS):
                 self.train_step(backbone, rpn, loss_object, optimizer, image_batch, [bounding_boxes], train_loss, train_accuracy)
 
@@ -173,16 +175,19 @@ class RpnTest(unittest.TestCase):
                 train_loss.reset_states()
                 train_accuracy.reset_states()
             
-            predicted_boxes = rpn.get_boxes(rpn.call(image_feature_map))
-            print(predicted_boxes)
+            predicted_boxes = rpn.get_boxes(rpn.call(backbone(image_batch)))
+            for anchor in predicted_boxes:
+                cv2.rectangle(image, (int(anchor[0]), int(anchor[1])), (int(anchor[2]), int(anchor[3])), (0,0,255),1)
+            cv2.imshow('image',image)
+            cv2.waitKey(0)
     # @tf.function
     def train_step(self, backbone, rpn, loss_object, optimizer, images, labels, train_loss, train_accuracy):
         with tf.GradientTape() as tape:
             feature_map = backbone(images)
             predictions = rpn(feature_map)
             loss = loss_object(labels, predictions)
-            gradients = tape.gradient(loss, rpn.trainable_variables)
-            optimizer.apply_gradients(zip(gradients, rpn.trainable_variables))
+        gradients = tape.gradient(loss, rpn.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, rpn.trainable_variables))
 
         train_loss(loss)
         # train_accuracy(labels, predictions)

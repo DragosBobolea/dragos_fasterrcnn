@@ -10,7 +10,7 @@ class RegionProposalNetwork(keras.Model):
         self.base_anchor_size = 64
         self.positive_iou_threshold = 0.5
         self.negative_iou_threshold = 0.3
-        self.batch_size = 4
+        self.batch_size = 2
         self.positives_ratio = 0.5
         self.minibatch_positives_number = int(self.positives_ratio * self.batch_size)
         self.minibatch_negatives_number = self.batch_size - self.minibatch_positives_number
@@ -27,7 +27,8 @@ class RegionProposalNetwork(keras.Model):
         self.conv1 = keras.layers.Conv2D(filters=256,kernel_size=3,activation='relu',padding='same')
         self.conv2 = keras.layers.Conv2D(filters=256,kernel_size=3,activation='relu',padding='same')
         self.box_regression = keras.layers.Conv2D(filters=4 * len(self.anchor_templates), kernel_size=1)
-        self.box_classification = keras.layers.Conv2D(filters=2 * len(self.anchor_templates), kernel_size=1, activation='sigmoid')
+        self.box_classification = keras.layers.Conv2D(filters=2 * len(self.anchor_templates), kernel_size=1)
+        self.classification_softmax = keras.activations.softmax
 
     def call(self, input, training=False):
         x = self.conv1(input)
@@ -37,6 +38,7 @@ class RegionProposalNetwork(keras.Model):
 
         output_classification = self.box_classification(x)
         output_classification = tf.reshape(output_classification, (output_classification.shape[0], output_classification.shape[1], output_classification.shape[2], len(self.anchor_templates), 2))
+        output_classification = self.classification_softmax(output_classification, axis=4)
         output = tf.concat((output_classification, output_regression),axis=4)
         return output
 
@@ -47,11 +49,7 @@ class RegionProposalNetwork(keras.Model):
         positives_mask = tf.argmax(rpn_output_classification,axis=4) == 1
         anchors = self.generate_anchors(predictions)
 
-
-        # boxes = anchors[positives_mask] 
-        # scores = rpn_output_classification[positives_mask][:,:,:,:,1]
-        # boxes = tf.image.non_max_suppression(boxes, scores)
-        return anchors[positives_mask]
+        return tf.boolean_mask(anchors, positives_mask)
 
     # @tf.function
     def rpn_loss(self, ground_truths, rpn_output):
@@ -63,13 +61,9 @@ class RegionProposalNetwork(keras.Model):
         ground_truth_targets = self.get_targets(anchors, ground_truths, positive_anchor_indices, positive_gt_indices, negative_anchor_indices)
 
         rpn_output_classification = rpn_output[:,:,:,:,:2]
-        rpn_output_regression = rpn_output[:,:,:,:,2:]
 
         positives_classification = tf.gather_nd(rpn_output_classification[0], tf.transpose(positive_anchor_indices[0]))
-        positives_regression = tf.gather_nd(rpn_output_regression[0], tf.transpose(positive_anchor_indices[0]))
-
         negatives_classification = tf.gather_nd(rpn_output_classification[0], tf.transpose(negative_anchor_indices[0]))
-
         ones = tf.ones((tf.shape(positive_gt_indices)[1]),dtype=tf.int32)
         zeros = tf.zeros((tf.shape(negative_anchor_indices)[2]),dtype=tf.int32)
         
@@ -77,9 +71,18 @@ class RegionProposalNetwork(keras.Model):
         minibatch_classes = tf.one_hot(minibatch_classes, 2)
         prediction_classes = tf.concat((positives_classification, negatives_classification), axis=0)
         classification_loss = tf.losses.binary_crossentropy(prediction_classes, minibatch_classes)
+
+
+
+
+        rpn_output_regression = rpn_output[:,:,:,:,2:]
+        positives_regression = tf.gather_nd(rpn_output_regression[0], tf.transpose(positive_anchor_indices[0]))
+
+
         regression_loss = tf.losses.mean_absolute_error(positives_regression, ground_truth_targets)
 
-        return self.loss_regression_weight * tf.reduce_mean(regression_loss) + self.loss_classification_weight * tf.reduce_mean(classification_loss)
+        # return self.loss_regression_weight * tf.reduce_mean(regression_loss) + self.loss_classification_weight * tf.reduce_mean(classification_loss)
+        return self.loss_classification_weight * tf.reduce_mean(classification_loss)
 
 
     '''
