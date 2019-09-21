@@ -8,7 +8,7 @@ class RegionProposalNetwork(keras.Model):
         # hard-coded parameters (for now)
         self.stride = 32
         self.base_anchor_size = 64
-        self.positive_iou_threshold = 0.5
+        self.positive_iou_threshold = 0.7
         self.negative_iou_threshold = 0.3
         self.batch_size = 2
         self.positives_ratio = 0.5
@@ -16,7 +16,7 @@ class RegionProposalNetwork(keras.Model):
         self.minibatch_negatives_number = self.batch_size - self.minibatch_positives_number
         self.max_number_of_predictions = 400
         self.loss_classification_weight = 1
-        self.loss_regression_weight = 0
+        self.loss_regression_weight = 1
         # parameters
         self.backbone = backbone
         self.scales = scales
@@ -48,8 +48,32 @@ class RegionProposalNetwork(keras.Model):
         
         positives_mask = tf.argmax(rpn_output_classification,axis=4) == 1
         anchors = self.generate_anchors(predictions)
+        positive_anchors = tf.boolean_mask(anchors, positives_mask) 
+        positive_regressions = tf.boolean_mask(rpn_output_regression, positives_mask)
 
-        return tf.boolean_mask(anchors, positives_mask)
+       
+        positive_anchors_coords = tf.unstack(positive_anchors, axis=1)
+        positive_anchors_left = positive_anchors_coords[0]
+        positive_anchors_top = positive_anchors_coords[1]
+        positive_anchors_right = positive_anchors_coords[2]
+        positive_anchors_bottom = positive_anchors_coords[3]
+        positive_anchors_x = (positive_anchors_left + positive_anchors_right) / 2
+        positive_anchors_y = (positive_anchors_top + positive_anchors_bottom) / 2
+        positive_anchors_w = (positive_anchors_right - positive_anchors_left)
+        positive_anchors_h = (positive_anchors_bottom - positive_anchors_top)
+
+
+        boxes_x = positive_anchors_x + positive_regressions[:,0] * positive_anchors_w
+        boxes_y = positive_anchors_y + positive_regressions[:,1] * positive_anchors_h
+        boxes_w = tf.math.exp(positive_regressions[:,2]) * positive_anchors_w
+        boxes_h = tf.math.exp(positive_regressions[:,3]) * positive_anchors_h
+
+
+
+        boxes = tf.stack([boxes_x - boxes_w/2, boxes_y - boxes_h/2, boxes_x + boxes_w/2, boxes_y + boxes_h/2],axis=1)
+
+
+        return boxes
 
     # @tf.function
     def rpn_loss(self, ground_truths, rpn_output):
@@ -61,7 +85,6 @@ class RegionProposalNetwork(keras.Model):
         ground_truth_targets = self.get_targets(anchors, ground_truths, positive_anchor_indices, positive_gt_indices, negative_anchor_indices)
 
         rpn_output_classification = rpn_output[:,:,:,:,:2]
-
         positives_classification = tf.gather_nd(rpn_output_classification[0], tf.transpose(positive_anchor_indices[0]))
         negatives_classification = tf.gather_nd(rpn_output_classification[0], tf.transpose(negative_anchor_indices[0]))
         ones = tf.ones((tf.shape(positive_gt_indices)[1]),dtype=tf.int32)
@@ -81,8 +104,7 @@ class RegionProposalNetwork(keras.Model):
 
         regression_loss = tf.losses.mean_absolute_error(positives_regression, ground_truth_targets)
 
-        # return self.loss_regression_weight * tf.reduce_mean(regression_loss) + self.loss_classification_weight * tf.reduce_mean(classification_loss)
-        return self.loss_classification_weight * tf.reduce_mean(classification_loss)
+        return self.loss_regression_weight * tf.reduce_mean(regression_loss) + self.loss_classification_weight * tf.reduce_mean(classification_loss)
 
 
     '''

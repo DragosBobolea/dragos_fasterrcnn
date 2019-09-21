@@ -156,12 +156,12 @@ class RpnTest(unittest.TestCase):
             rpn_output = rpn.call(image_feature_map)
             loss_object = rpn.rpn_loss
             
-            optimizer = tf.keras.optimizers.Adam()
+            optimizer = keras.optimizers.SGD(lr=0.00001, clipvalue=0.5)
+
             train_loss = tf.keras.metrics.Mean(name='train_loss')
             train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
             
-            
-            EPOCHS = 100
+            EPOCHS = 1500
             for epoch in range(EPOCHS):
                 self.train_step(backbone, rpn, loss_object, optimizer, image_batch, [bounding_boxes], train_loss, train_accuracy)
 
@@ -177,9 +177,12 @@ class RpnTest(unittest.TestCase):
             
             predicted_boxes = rpn.get_boxes(rpn.call(backbone(image_batch)))
             for anchor in predicted_boxes:
+                anchor = np.clip(anchor,0,500)
                 cv2.rectangle(image, (int(anchor[0]), int(anchor[1])), (int(anchor[2]), int(anchor[3])), (0,0,255),1)
+            print(predicted_boxes)
             cv2.imshow('image',image)
             cv2.waitKey(0)
+            
     # @tf.function
     def train_step(self, backbone, rpn, loss_object, optimizer, images, labels, train_loss, train_accuracy):
         with tf.GradientTape() as tape:
