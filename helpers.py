@@ -23,10 +23,10 @@ def intersection_over_union(boxes1, boxes2):
     xB = tf.minimum(x12, tf.transpose(x22))
     yB = tf.minimum(y12, tf.transpose(y22))
 
-    interArea = tf.maximum((xB - xA + 1), 0) * tf.maximum((yB - yA + 1), 0)
+    interArea = tf.maximum((xB - xA), 0) * tf.maximum((yB - yA), 0)
 
-    boxAArea = (x12 - x11 + 1) * (y12 - y11 + 1)
-    boxBArea = (x22 - x21 + 1) * (y22 - y21 + 1)
+    boxAArea = (x12 - x11) * (y12 - y11)
+    boxBArea = (x22 - x21) * (y22 - y21)
 
     iou = interArea / (boxAArea + tf.transpose(boxBArea) - interArea)
     return iou
@@ -87,3 +87,21 @@ def IoUTensorial(A: np.ndarray, B: np.ndarray, format: str = 'XYWH') -> np.ndarr
     U = sum_area.reshape(I.shape) - I # the union areas
     IoU = I / U # the IoU scores of all the rectangle pairs in A and B
     return IoU.reshape((nrA, nrB))
+
+
+def get_random_image(shape):
+    image = np.zeros((shape[0],shape[1],3))
+    boxes = []
+    n_h = 5#np.random.randint(1,10)
+    n_w = 5#np.random.randint(1,10)
+    h_slice = shape[0] // n_h
+    w_slice = shape[1] // n_w
+    for i_h in range(n_h):
+        for i_w in range(n_w):
+            x = i_w * w_slice + np.random.randint(1,w_slice)
+            y = i_h * h_slice + np.random.randint(1,h_slice)
+            x2 = 40 + x + np.random.randint(1, x - i_w * w_slice + 1)
+            y2 = 40 + y + np.random.randint(1, y - i_h * h_slice + 1)
+            image[y:y2, x:x2] = 1
+            boxes.append([x / float(shape[1]), y/ float(shape[1]), x2/ float(shape[1]), y2/ float(shape[1])]) 
+    return image, np.array(boxes)
