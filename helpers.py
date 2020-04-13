@@ -64,8 +64,8 @@ def IoUTensorial(A: np.ndarray, B: np.ndarray, format: str = 'XYWH') -> np.ndarr
         B[:, 3] = B[:, 1] + B[:, 3] - 1
     else:
         #compute areas of recangles
-        A_areas = (A[:, 2] - A[:, 0] + 1) * (A[:, 3] - A[:, 1] + 1)
-        B_areas = (B[:, 2] - B[:, 0] + 1) * (B[:, 3] - B[:, 1] + 1)
+        A_areas = (A[:, 2] - A[:, 0]) * (A[:, 3] - A[:, 1])
+        B_areas = (B[:, 2] - B[:, 0]) * (B[:, 3] - B[:, 1])
 
 
     #compute sum of areas of all the pairs of rectangles
@@ -81,8 +81,8 @@ def IoUTensorial(A: np.ndarray, B: np.ndarray, format: str = 'XYWH') -> np.ndarr
     ul = np.maximum(eA[:, :, 0:2].ravel(), eB[:, :, 0:2].ravel()).reshape(half_shape) #upper left corner of intersection rectangle
     br = np.minimum(eA[:, :, 2:4].ravel(), eB[:, :, 2:4].ravel()).reshape(half_shape) #bottom right corner of intersection rectangle
 
-    w = np.clip(br[:, :, 0] - ul[:, :, 0] + 1, 0, np.Infinity) #width of the intersection rectangle
-    h = np.clip(br[:, :, 1] - ul[:, :, 1] + 1, 0, np.Infinity) #height of the intersection rectangle
+    w = np.clip(br[:, :, 0] - ul[:, :, 0], 0, np.Infinity) #width of the intersection rectangle
+    h = np.clip(br[:, :, 1] - ul[:, :, 1], 0, np.Infinity) #height of the intersection rectangle
     I = np.clip(w * h, 0, np.Infinity) # the intersection areas
     U = sum_area.reshape(I.shape) - I # the union areas
     IoU = I / U # the IoU scores of all the rectangle pairs in A and B
@@ -103,5 +103,7 @@ def get_random_image(shape):
             x2 = 40 + x + np.random.randint(1, x - i_w * w_slice + 1)
             y2 = 40 + y + np.random.randint(1, y - i_h * h_slice + 1)
             image[y:y2, x:x2] = 1
-            boxes.append([x / float(shape[1]), y/ float(shape[1]), x2/ float(shape[1]), y2/ float(shape[1])]) 
+            boxes.append([x / float(shape[1] + 1), y/ float(shape[1] + 1), x2/ float(shape[1] + 1), y2/ float(shape[1] + 1)]) 
+    boxes = np.clip(boxes, 0, 1)
+    image -= 0.5
     return image, np.array(boxes)
