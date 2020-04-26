@@ -102,8 +102,8 @@ def get_random_image(shape):
             y = i_h * h_slice + np.random.randint(1,h_slice)
             x2 = 40 + x + np.random.randint(1, x - i_w * w_slice + 1)
             y2 = 40 + y + np.random.randint(1, y - i_h * h_slice + 1)
-            image[y:y2, x:x2] = 1
-            boxes.append([x / float(shape[1] + 1), y/ float(shape[1] + 1), x2/ float(shape[1] + 1), y2/ float(shape[1] + 1)]) 
+            image[y:y2, x:x2] = np.random.ranf() * 0.5 + 0.5
+            boxes.append([x / float(shape[1]), y/ float(shape[0]), x2/ float(shape[1]), y2/ float(shape[0])]) 
     boxes = np.clip(boxes, 0, 1)
     image -= 0.5
     return image, np.array(boxes)
