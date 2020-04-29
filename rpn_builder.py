@@ -46,6 +46,7 @@ class RegionProposalNetwork(keras.Model):
         output_classification_shape = tf.shape(output_classification)
         output_classification = tf.reshape(output_classification, (output_classification_shape[0], output_classification_shape[1], output_classification_shape[2], len(self.anchor_templates), 2))
         output_classification = self.classification_softmax(output_classification, axis=4)
+
         output = tf.concat((output_classification, output_regression),axis=4)
         return output
 
@@ -117,8 +118,8 @@ class RegionProposalNetwork(keras.Model):
         rpn_output_regression = rpn_output[:,:,:,:,2:]
         positives_regression = tf.gather_nd(rpn_output_regression[0], tf.transpose(positive_anchor_indices[0]))
 
-
-        regression_loss = tf.losses.mean_absolute_error(positives_regression, ground_truth_targets)
+        huber_loss = tf.keras.losses.Huber()
+        regression_loss = huber_loss(positives_regression, ground_truth_targets)
 
         return self.loss_regression_weight * tf.reduce_mean(regression_loss) + self.loss_classification_weight * tf.reduce_mean(classification_loss)
         # return tf.reduce_mean(classification_loss)
