@@ -22,14 +22,14 @@ class FasterRCNN(keras.Model):
         features = self.get_feature_map()(input)
 
         rpn_output = self.rpn(features)
-        if training:
-            roi_pooled = self.roi_pooling(rpn_output)
-            output = self.box_predictor(roi_pooled)
-        else:
-            roi_pooled = self.roi_pooling(rpn_output)
-            output = self.box_predictor(roi_pooled)
+        roi_pooled = self.roi_pooling(rpn_output)
+        output = self.box_predictor(roi_pooled)
 
+        return output
 
+    def loss(self, ground_truths, output):
+        # 
+        loss(self, ground_truths, output, anchor_boxes)
 
     def get_feature_map(self):
         return self.backbone.outputs[0]
